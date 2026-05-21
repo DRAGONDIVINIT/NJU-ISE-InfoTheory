@@ -1,9 +1,9 @@
-# Project 1：文本无损信源编码（Huffman）
+# Project 1：文本无损信源编码
 
 **课程**：南京大学 ISE · 信息论基础（2026 春）  
-**任务**：设计一种面向文本的无损信源编码，编程实现，并验证编码效率（平均码长与 Shannon 熵的关系、无损还原）。
+**任务**：设计一种面向文本的无损信源编码，编程实现，并验证编码效率。
 
-本目录为仓库中的 **Project 1** 实现，主程序为 `pro1.py`（Python 标准库，无第三方依赖）。
+本目录为仓库中的 **Project 1** 实现，主程序为 `pro1.py`（Python 标准库，无第三方依赖）。**默认以交互菜单运行**，无需记忆命令行参数。
 
 ---
 
@@ -12,11 +12,44 @@
 ```
 pro1/
 ├── readme.md      # 本文件
-├── pro1.py        # Huffman 编解码、效率分析、命令行入口
-└── sample.txt     # 默认信源样例（无参数或找不到输入文件时使用）
+├── pro1.py        # Huffman 编解码、效率分析、交互菜单
+├── sample.txt     # 默认信源样例
+└── run.bat        # Windows 双击启动（进入交互菜单）
 ```
 
-使用 `-o` 编码后会额外生成 `.huf` 压缩文件（路径由参数指定，不在仓库内）。
+编码保存后会在本目录生成 `.huf` 及 `*_restored.txt`（解码时）。
+
+---
+
+## 快速开始（推荐）
+
+### 方式一：双击 `run.bat`（Windows）
+
+自动切换到 UTF-8 并启动交互菜单，按提示用数字或回车选择即可。
+
+### 方式二：只运行主程序
+
+```powershell
+cd "E:\NJU-ISE-Info Theory\pro1"
+python pro1.py
+```
+
+### 交互菜单
+
+```
+  [1] 编码并分析（打印效率报告）
+  [2] 编码并保存为 .huf
+  [3] 解码 .huf 并保存还原文本
+  [0] 退出
+```
+
+| 功能 | 操作说明 |
+|------|----------|
+| **1 编码并分析** | 列出当前目录下 `.txt`，输入编号选择；**回车**使用 `sample.txt`。完成后打印效率报告，不写文件。 |
+| **2 编码并保存** | 同上选择源文本；**回车**将输出为 `源文件名.huf`（如 `test.txt` → `test.huf`）。 |
+| **3 解码还原** | 列出当前目录下 `.huf`；**回车**将还原为 `原名_restored.txt`（如 `test.huf` → `test_restored.txt`）。 |
+
+也可在「请选择」处**直接输入或拖入**完整文件路径。每项结束后按回车返回菜单。
 
 ---
 
@@ -25,25 +58,23 @@ pro1/
 | 项目 | 实现说明 |
 |------|----------|
 | 信源模型 | 将文本视为**字符**符号序列，用 `Counter` 统计经验频率，按无记忆信源处理 |
-| 编码算法 | 最小堆（`heapq`）合并结点构建 Huffman 树；同频率用 `index` 打破平局，保证结果稳定 |
-| 码字生成 | 自根向下：左子树追加 `0`、右子树追加 `1`；单符号时码字为 `"0"` |
-| 比特打包 | 有效比特流末尾补 `0` 至整字节；头中记录有效位数 `bit_count` |
-| 无损验证 | 编码后立即 `decode`，断言还原文本与原文一致 |
-| 效率验证 | 计算 \(H\)、\(L\)、冗余 \(L-H\)、效率 \(\eta=H/L\)（理论上有 \(H \le L < H+1\)） |
-| 参考对比 | 同文本 UTF-8 字节的 `zlib.compress(..., level=9)` 体积（仅参考，非实验必达） |
+| 编码算法 | 最小堆（`heapq`）合并结点构建 Huffman 树；同频率用 `index` 打破平局 |
+| 码字生成 | 左子树 `0`、右子树 `1`；单符号时码字为 `"0"` |
+| 比特打包 | 有效比特流末尾补 `0` 至整字节；头中记录 `bit_count` |
+| 无损验证 | 编码后立即 `decode`，断言与原文一致 |
+| 效率验证 | 计算 \(H\)、\(L\)、冗余 \(L-H\)、效率 \(\eta=H/L\) |
+| 参考对比 | 同文本 UTF-8 的 `zlib.compress(..., level=9)`（仅参考） |
 
 ### 压缩文件格式（`.huf`）
 
-由 `HuffmanCoder.encode` 写出，布局如下：
-
 ```
-[4 B] 魔数 MAGIC = "HUF1"
+[4 B] 魔数 "HUF1"
 [4 B] 大端 uint32：JSON 头长度
 [变长] UTF-8 JSON：{ "bit_count": int, "codes": { "字符": "01串", ... } }
-[变长] 载荷字节（比特串经 bits_to_bytes 打包）
+[变长] 载荷字节
 ```
 
-解码时读取头与载荷，按码本逐比特匹配前缀码还原字符。码本以 JSON 存入文件头，短文本时**头开销较大**，压缩比可能小于 1，但不影响用 \(\eta\) 评价码本是否接近熵界。
+短文本时 JSON 码本开销大，压缩比可能小于 1；用 \(\eta\) 评价码本是否接近熵界。
 
 ---
 
@@ -51,124 +82,52 @@ pro1/
 
 | 符号 | 作用 |
 |------|------|
-| `shannon_entropy` | 由频率表计算 \(H(X)\)（bit/符号，以 2 为底） |
-| `build_huffman_tree` / `build_codes` | 建树与生成字符→码字映射 |
-| `average_code_length` | 平均码长 \(L=\sum p(x)\,l(x)\) |
-| `bits_to_bytes` / `bytes_to_bits` | 比特流与字节互转（含尾部填充） |
-| `HuffmanCoder` | `fit` 统计频率并建树；`encode` / `decode` 编解码 |
-| `utf8_byte_entropy` | 按 UTF-8 **字节**统计的熵（报告参考项） |
-| `verify_lossless` | 编码结果往返解码，与原文比对 |
-| `analyze` / `print_report` | 汇总指标并打印中文报告 |
-| `load_text` / `load_default_sample` | 读取 UTF-8 文本；默认路径为同目录 `sample.txt` |
-| `main` | 命令行：`input`、`-o/--output`、`--decode` |
+| `HuffmanCoder` | `fit` / `encode` / `decode` |
+| `run_encode` / `run_decode` | 编码分析与解码还原（交互与 CLI 共用） |
+| `interactive_loop` | 交互菜单主循环 |
+| `analyze` / `print_report` | 效率指标与中文报告 |
+| `main` | 无参数→交互；有参数→命令行模式 |
 
-常量：`MAGIC = b"HUF1"`，`SAMPLE_FILE` 指向 `sample.txt`。
+常量：`MAGIC = b"HUF1"`，`SAMPLE_FILE` → `sample.txt`。
 
 ---
 
 ## 运行环境
 
-- **Python**：3.8+（建议 3.10+）
-- **依赖**：仅标准库（`heapq`、`json`、`struct`、`zlib`、`argparse` 等），**无需** `pip install`
-- **编码**：读写文本均为 **UTF-8**；Windows 终端若中文乱码，可先执行 `chcp 65001` 或设置控制台为 UTF-8
+- **Python**：3.8+
+- **依赖**：仅标准库，**无需** `pip install`
+- **编码**：UTF-8；Windows 建议用 `run.bat` 或 `chcp 65001` 避免中文乱码
 
 ---
 
-## 如何运行
+## 命令行模式（可选）
 
-进入本目录后执行：
-
-```powershell
-cd "E:\NJU-ISE-Info Theory\pro1"
-```
-
-### 命令行参数
+需要脚本化或批处理时，可传入参数（**有任意参数时不再进入菜单**）：
 
 | 用法 | 说明 |
 |------|------|
-| `python pro1.py` | 读取同目录 `sample.txt`，编码并打印效率报告（**不写**文件） |
-| `python pro1.py <文件>` | 对指定 UTF-8 文本编码、打印报告（**不写** `.huf`） |
-| `python pro1.py <文件> -o out.huf` | 编码、打印报告，并将压缩结果写入 `out.huf` |
-| `python pro1.py --decode out.huf` | 解码已生成的 `out.huf`，原文输出到 **stdout** |
-
-说明：
-
-- `<文件>` 路径不存在时：向 stderr 打印警告，并**回退为 `sample.txt`**。
-- 未加 `-o` 时，压缩数据仅在内存中用于报告与无损验证；**解码前必须先**用 `-o` 写出 `.huf`。
-- `--decode` 时若文件不存在，程序退出码为 `1` 并提示先编码。
-
-### 示例
-
-```powershell
-# 默认样例 + 报告
-python pro1.py
-
-# 指定信源
-python pro1.py sample.txt
-
-# 自备 UTF-8 文本
-python pro1.py test.txt
-
-# 写出压缩文件（解码依赖此步骤）
-python pro1.py test.txt -o test.huf
-
-# 解码到控制台，可重定向保存
-python pro1.py --decode test.huf | Out-File -Encoding utf8 restored.txt
-```
+| `python pro1.py` | 交互菜单（默认） |
+| `python pro1.py <文件>` | 编码并打印报告 |
+| `python pro1.py <文件> -o out.huf` | 编码、报告并写出 `.huf` |
+| `python pro1.py --decode out.huf` | 解码并输出到 stdout |
 
 ---
 
 ## 输出报告说明
 
-运行编码流程后，终端输出中文报告（`print_report`），主要字段如下：
-
 | 输出项 | 含义 |
 |--------|------|
-| 符号数（字符） | 字符总数 `len(text)` |
-| 不同符号种类数 | 频率表中不同字符数 |
-| Shannon 熵 H（每符号） | 按**字符**统计的 \(H\)（bit/符号） |
-| Shannon 熵 H（每字节） | 按 UTF-8 字节统计的熵 |
-| Huffman 平均码长 L | 由码长加权的理论平均码长 |
-| 冗余度 (L - H) | \(L - H\) |
-| 编码效率 η = H/L | 越接近 1 越接近熵界（Kraft 意义下的最优性） |
-| 原文体积 (UTF-8) | 原文 UTF-8 字节数 |
-| 压缩后体积 (Huffman) | 内存中压缩 `bytes` 的长度（含 JSON 码本头） |
-| 压缩比（原/压） | 原文字节数 / 压缩字节数 |
-| 实际比特/符号（含开销） | `len(compressed)×8 / 符号数` |
-| zlib 参考 | 标准库 zlib 压缩体积与压缩比 |
-| 无损往返验证：通过 | `verify_lossless` 通过 |
+| Shannon 熵 H（每符号） | 按字符的 \(H\)（bit/符号） |
+| Huffman 平均码长 L | 理论平均码长 |
+| 编码效率 η = H/L | 越接近 1 越接近熵界 |
+| 压缩比（原/压） | 含码本头的实际体积比 |
+| zlib 参考 | 标准库 zlib 对比 |
+| 无损往返验证：通过 | 往返解码与原文一致 |
 
-**说明**：\(\eta \approx 1\) 表示**码字设计**接近最优；**压缩比**受 JSON 码本头影响，短文本常常小于 1 属正常现象。使用更长、重复度更高的文本可观察压缩比上升。
-
----
-
-## 实验报告可写要点
-
-1. 简述 Huffman 构造步骤与前缀码性质（Kraft 不等式、无歧义解码）。
-2. 给出一次运行的 \(H\)、\(L\)、\(L-H\)、\(\eta\) 及「无损往返验证：通过」截图或表格。
-3. 对比 `sample.txt` 与自备长文本：\(\eta\) 与压缩比的变化，解释码本开销。
-4. 可选：说明 `zlib` 在字节级体积更小的原因（信源模型为字节、DEFLATE 字典等）。
+\(\eta \approx 1\) 表示码字接近最优；短文本压缩比小于 1 属正常。
 
 ---
 
 ## 默认样例 `sample.txt`
 
-无有效输入文件时，程序读取与 `pro1.py` 同目录的 **`sample.txt`**（UTF-8）。内容为信息论相关中英文段落，整体重复 3 次，便于观察频率与 \(\eta\)。可直接编辑该文件，或复制为其他文件名做对比实验。
-
----
-
-## 常见问题（Windows）
-
-**现象**：执行 `python` 即报错  
-`UnicodeDecodeError: 'gbk' codec can't decode ...`（`init_import_site`）。
-
-**原因**：用户目录 `site-packages` 中 `.pth` 含 UTF-8 中文路径，与系统 GBK locale 冲突。
-
-**处理**：临时禁用用户 site-packages 后再运行：
-
-```powershell
-$env:PYTHONNOUSERSITE = "1"
-python pro1.py
-```
-
-或将问题 `.pth` 重命名为 `.pth.bak`。请使用 `python pro1.py`，勿依赖 Unix shebang。
+交互菜单中编码时**回车**即使用 `sample.txt`（信息论相关中英文，重复 3 次）。可直接编辑或新增 `.txt` 做对比。

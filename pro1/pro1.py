@@ -6,7 +6,6 @@ Verify: compare average code length L with Shannon entropy H; report efficiency 
 """
 
 from __future__ import annotations
-
 import argparse
 import heapq
 import json
@@ -27,7 +26,7 @@ SAMPLE_FILE = Path(__file__).resolve().parent / "sample.txt"
 class _HeapItem:
     freq: int
     index: int
-    node: "HuffmanNode" = field(compare=False, default=None)  # type: ignore[assignment]
+    node: "HuffmanNode" = field(compare=False, default=None)
 
 
 @dataclass
@@ -241,60 +240,171 @@ def load_default_sample() -> str:
     return load_text(SAMPLE_FILE)
 
 
+BASE_DIR = Path(__file__).resolve().parent
+
+
+def _list_files(directory: Path, suffix: str) -> List[Path]:
+    return sorted(
+        p for p in directory.iterdir() if p.is_file() and p.suffix.lower() == suffix
+    )
+
+
+def _prompt_line(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        raise KeyboardInterrupt
+
+
+def _pick_path(
+    title: str,
+    candidates: List[Path],
+    default: Optional[Path] = None,
+) -> Optional[Path]:
+    """从编号列表或路径字符串选择文件；空输入返回 default。"""
+    print(title)
+    for i, path in enumerate(candidates, 1):
+        print(f"  [{i}] {path.name}")
+    if default:
+        print(f"  [回车] 使用默认：{default.name}")
+    print("  或直接输入/拖入文件路径")
+    choice = _prompt_line("请选择: ")
+    if not choice:
+        return default
+    if choice.isdigit():
+        idx = int(choice)
+        if 1 <= idx <= len(candidates):
+            return candidates[idx - 1]
+        print("编号无效。")
+        return None
+    path = Path(choice.strip('"').strip("'"))
+    if path.is_file():
+        return path
+    print(f"找不到文件: {path}")
+    return None
+
+
+def run_encode(src_path: Path, out_path: Optional[Path] = None) -> int:
+    text = load_text(src_path)
+    coder = HuffmanCoder()
+    coder.fit(text)
+    compressed = coder.encode(text)
+    verify_lossless(text, compressed)
+    if out_path:
+        out_path.write_bytes(compressed)
+        print(f"\n已写入 {out_path}（{len(compressed)} 字节）")
+    print()
+    print_report(text, compressed, src_path)
+    return 0
+
+
+def run_decode(huf_path: Path, restored_path: Optional[Path] = None) -> int:
+    data = huf_path.read_bytes()
+    text = HuffmanCoder().decode(data)
+    if restored_path:
+        restored_path.write_text(text, encoding="utf-8")
+        print(f"已还原并保存到 {restored_path}（{len(text)} 字符）")
+    else:
+        print(text)
+    return 0
+
+
+def interactive_loop() -> int:
+    print("=" * 60)
+    print("  文本 Huffman 无损信源编码")
+    print(f"  工作目录: {BASE_DIR}")
+    print("=" * 60)
+
+    while True:
+        print()
+        print("  [1] 编码并分析（打印效率报告）")
+        print("  [2] 编码并保存为 .huf")
+        print("  [3] 解码 .huf 并保存还原文本")
+        print("  [0] 退出")
+        try:
+            action = _prompt_line("请选择功能 (0-3): ")
+        except KeyboardInterrupt:
+            print("\n再见。")
+            return 0
+
+        if action in ("0", "q", "Q", "exit"):
+            print("再见。")
+            return 0
+        if action not in ("1", "2", "3"):
+            print("请输入 0、1、2 或 3。")
+            continue
+
+        try:
+            if action in ("1", "2"):
+                txt_files = _list_files(BASE_DIR, ".txt")
+                src = _pick_path("\n可选 UTF-8 文本:", txt_files, default=SAMPLE_FILE)
+                if not src:
+                    continue
+                out: Optional[Path] = None
+                if action == "2":
+                    default_out = src.with_suffix(".huf")
+                    hint = _prompt_line(
+                        f"输出 .huf 路径（回车默认 {default_out.name}）: "
+                    )
+                    out = Path(hint) if hint else default_out
+                    if not out.is_absolute():
+                        out = BASE_DIR / out
+                run_encode(src, out)
+            else:
+                huf_files = _list_files(BASE_DIR, ".huf")
+                if not huf_files:
+                    print("\n当前目录下没有 .huf 文件，请先执行 [2] 编码保存。")
+                    continue
+                huf = _pick_path("\n可选 .huf 文件:", huf_files)
+                if not huf:
+                    continue
+                default_restored = huf.with_name(huf.stem + "_restored.txt")
+                hint = _prompt_line(
+                    f"还原文本保存路径（回车默认 {default_restored.name}）: "
+                )
+                restored = Path(hint) if hint else default_restored
+                if not restored.is_absolute():
+                    restored = BASE_DIR / restored
+                run_decode(huf, restored)
+        except KeyboardInterrupt:
+            print("\n已取消当前操作。")
+        except (FileNotFoundError, ValueError, AssertionError) as exc:
+            print(f"\n错误: {exc}")
+
+        _prompt_line("\n按回车继续...")
+
+
 def main(argv: Optional[Iterable[str]] = None) -> int:
+    raw = list(argv) if argv is not None else sys.argv[1:]
+    if not raw:
+        return interactive_loop()
+
     parser = argparse.ArgumentParser(description="文本 Huffman 无损信源编码")
     parser.add_argument(
         "input",
         nargs="?",
         type=Path,
-        help="待压缩的 UTF-8 文本文件（默认使用同目录 sample.txt）",
+        help="待压缩的 UTF-8 文本文件（默认 sample.txt）",
     )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help="将压缩结果写入 .huf 文件",
-    )
-    parser.add_argument(
-        "--decode",
-        type=Path,
-        help="解码 .huf 文件并将原文输出到标准输出",
-    )
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    parser.add_argument("-o", "--output", type=Path, help="将压缩结果写入 .huf")
+    parser.add_argument("--decode", type=Path, help="解码 .huf 并输出到 stdout")
+    args = parser.parse_args(raw)
 
     if args.decode:
         if not args.decode.is_file():
-            print(
-                f"错误：找不到压缩文件 {args.decode}\n"
-                f"请先编码并写出文件，例如：python pro1.py 源文本.txt -o {args.decode}",
-                file=sys.stderr,
-            )
+            print(f"错误：找不到压缩文件 {args.decode}", file=sys.stderr)
             return 1
-        data = args.decode.read_bytes()
-        text = HuffmanCoder().decode(data)
-        sys.stdout.write(text)
-        return 0
+        return run_decode(args.decode)
 
     if args.input and args.input.is_file():
-        text = load_text(args.input)
         src_path = args.input
     else:
-        text = load_default_sample()
         src_path = SAMPLE_FILE
         if args.input:
             print(f"警告：未找到 {args.input}，改用 {SAMPLE_FILE}。", file=sys.stderr)
 
-    coder = HuffmanCoder()
-    coder.fit(text)
-    compressed = coder.encode(text)
-    verify_lossless(text, compressed)
-
-    if args.output:
-        args.output.write_bytes(compressed)
-        print(f"已写入 {args.output}（{len(compressed)} 字节）", file=sys.stderr)
-
-    print_report(text, compressed, src_path)
-    return 0
+    return run_encode(src_path, args.output)
 
 
 if __name__ == "__main__":
