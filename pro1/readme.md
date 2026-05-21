@@ -14,7 +14,7 @@ pro1/
 ├── readme.md      # 本文件
 ├── pro1.py        # Huffman 编解码、效率分析、交互菜单
 ├── sample.txt     # 默认信源样例
-└── run.bat        # Windows 双击启动（进入交互菜单）
+└── pro1.bat        # Windows 双击启动（进入交互菜单）
 ```
 
 编码保存后会在本目录生成 `.huf` 及 `*_restored.txt`（解码时）。
@@ -23,7 +23,7 @@ pro1/
 
 ## 快速开始（推荐）
 
-### 方式一：双击 `run.bat`（Windows）
+### 方式一：双击 `pro1.bat`（Windows）
 
 自动切换到 UTF-8 并启动交互菜单，按提示用数字或回车选择即可。
 
@@ -96,7 +96,7 @@ python pro1.py
 
 - **Python**：3.8+
 - **依赖**：仅标准库，**无需** `pip install`
-- **编码**：UTF-8；Windows 建议用 `run.bat` 或 `chcp 65001` 避免中文乱码
+- **编码**：UTF-8；Windows 建议用 `pro1.bat` 或 `chcp 65001` 避免中文乱码
 
 ---
 
