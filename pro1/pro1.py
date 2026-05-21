@@ -1,132 +1,301 @@
+"""
+Project 1: Lossless source coding for text (Huffman coding).
+
+Design: variable-length prefix codes from symbol frequencies (Huffman algorithm).
+Verify: compare average code length L with Shannon entropy H; report efficiency η = H/L.
+"""
+
+from __future__ import annotations
+
+import argparse
 import heapq
-from collections import Counter, defaultdict
+import json
+import math
+import struct
+import sys
+import zlib
+from collections import Counter
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
 
-class HuffmanCoding:
-    def __init__(self):
-        self.heap = []
-        self.codes = {}
-        self.reverse_codes = {}
-    
-    class Node:
-        def __init__(self, char, freq, left=None, right=None):
-            self.char = char
-            self.freq = freq
-            self.left = left
-            self.right = right
-        
-        def __lt__(self, other):
-            return self.freq < other.freq
-    
-    def build_huffman_tree(self, text):
-        # 统计频率
-        freq = Counter(text)
-        
-        # 构建最小堆
-        for char, f in freq.items():
-            heapq.heappush(self.heap, self.Node(char, f))
-        
-        # 合并节点
-        while len(self.heap) > 1:
-            left = heapq.heappop(self.heap)
-            right = heapq.heappop(self.heap)
-            merged = self.Node(None, left.freq + right.freq, left, right)
-            heapq.heappush(self.heap, merged)
-        
-        return self.heap[0] if self.heap else None
-    
-    def generate_codes(self, node, code=""):
-        if node is None:
-            return
+MAGIC = b"HUF1"
+SAMPLE_FILE = Path(__file__).resolve().parent / "sample.txt"
+
+
+@dataclass(order=True)
+class _HeapItem:
+    freq: int
+    index: int
+    node: "HuffmanNode" = field(compare=False, default=None)  # type: ignore[assignment]
+
+
+@dataclass
+class HuffmanNode:
+    freq: int
+    char: Optional[str] = None
+    left: Optional["HuffmanNode"] = None
+    right: Optional["HuffmanNode"] = None
+
+
+def shannon_entropy(freq: Counter) -> float:
+    """H(X) in bits per symbol (natural log base 2)."""
+    total = sum(freq.values())
+    if total == 0:
+        return 0.0
+    h = 0.0
+    for count in freq.values():
+        if count > 0:
+            p = count / total
+            h -= p * math.log2(p)
+    return h
+
+
+def build_huffman_tree(freq: Counter) -> HuffmanNode:
+    if not freq:
+        raise ValueError("empty frequency table")
+    if len(freq) == 1:
+        (char,) = freq.keys()
+        return HuffmanNode(freq=freq[char], char=char)
+
+    heap: List[_HeapItem] = []
+    tie = 0
+    for char, count in freq.items():
+        heapq.heappush(heap, _HeapItem(count, tie, HuffmanNode(freq=count, char=char)))
+        tie += 1
+
+    while len(heap) > 1:
+        a = heapq.heappop(heap).node
+        b = heapq.heappop(heap).node
+        merged = HuffmanNode(freq=a.freq + b.freq, left=a, right=b)
+        heapq.heappush(heap, _HeapItem(merged.freq, tie, merged))
+        tie += 1
+
+    return heap[0].node
+
+
+def build_codes(root: HuffmanNode) -> Dict[str, str]:
+    codes: Dict[str, str] = {}
+
+    def walk(node: HuffmanNode, prefix: str) -> None:
         if node.char is not None:
-            self.codes[node.char] = code
-            self.reverse_codes[code] = node.char
+            codes[node.char] = prefix or "0"
             return
-        self.generate_codes(node.left, code + "0")
-        self.generate_codes(node.right, code + "1")
-    
-    def compress(self, text):
-        if not text:
-            return "", {}
-        root = self.build_huffman_tree(text)
-        self.generate_codes(root)
-        
-        # 压缩
-        compressed = "".join(self.codes[ch] for ch in text)
-        return compressed, self.codes
-    
-    def decompress(self, compressed_bitstring):
-        if not compressed_bitstring:
-            return ""
-        decoded = []
-        current_code = ""
-        for bit in compressed_bitstring:
-            current_code += bit
-            if current_code in self.reverse_codes:
-                decoded.append(self.reverse_codes[current_code])
-                current_code = ""
-        return "".join(decoded)
-    
-    def calculate_efficiency(self, text, compressed_bitstring):
-        original_bits = len(text) * 8  # ASCII 每字符8位
-        compressed_bits = len(compressed_bitstring)
-        compression_ratio = compressed_bits / original_bits
-        avg_code_length = compressed_bits / len(text)
-        
-        # 计算熵 H(X)
-        freq = Counter(text)
-        total = len(text)
-        entropy = -sum((count/total) * (count/total).bit_length()? 
-                       # 更精确的熵计算
-                       for count in freq.values())
-        # 改用 math.log2
-        import math
-        entropy = -sum((count/total) * math.log2(count/total) for count in freq.values())
-        
-        coding_efficiency = entropy / avg_code_length if avg_code_length > 0 else 0
-        
-        return {
-            "original_bits": original_bits,
-            "compressed_bits": compressed_bits,
-            "compression_ratio": compression_ratio,
-            "avg_code_length": avg_code_length,
-            "entropy": entropy,
-            "coding_efficiency": coding_efficiency
+        if node.left:
+            walk(node.left, prefix + "0")
+        if node.right:
+            walk(node.right, prefix + "1")
+
+    walk(root, "")
+    return codes
+
+
+def average_code_length(freq: Counter, codes: Dict[str, str]) -> float:
+    total = sum(freq.values())
+    if total == 0:
+        return 0.0
+    return sum((count / total) * len(codes[char]) for char, count in freq.items())
+
+
+def bits_to_bytes(bit_string: str) -> Tuple[bytes, int]:
+    """Pack bits; return (padded_bytes, valid_bit_count)."""
+    if not bit_string:
+        return b"", 0
+    pad = (8 - len(bit_string) % 8) % 8
+    padded = bit_string + "0" * pad
+    out = bytearray()
+    for i in range(0, len(padded), 8):
+        out.append(int(padded[i : i + 8], 2))
+    return bytes(out), len(bit_string)
+
+
+def bytes_to_bits(data: bytes, bit_count: int) -> str:
+    bits = "".join(f"{b:08b}" for b in data)
+    return bits[:bit_count]
+
+
+class HuffmanCoder:
+    def __init__(self, freq: Optional[Counter] = None) -> None:
+        self.freq: Counter = freq or Counter()
+        self.codes: Dict[str, str] = {}
+        self.root: Optional[HuffmanNode] = None
+
+    def fit(self, text: str) -> None:
+        self.freq = Counter(text)
+        self.root = build_huffman_tree(self.freq)
+        self.codes = build_codes(self.root)
+
+    def encode(self, text: str) -> bytes:
+        if not self.codes:
+            self.fit(text)
+        bit_string = "".join(self.codes[c] for c in text)
+        payload, bit_count = bits_to_bytes(bit_string)
+        header = {
+            "bit_count": bit_count,
+            "codes": self.codes,
         }
+        header_bytes = json.dumps(header, ensure_ascii=False).encode("utf-8")
+        return MAGIC + struct.pack(">I", len(header_bytes)) + header_bytes + payload
+
+    def decode(self, data: bytes) -> str:
+        if not data.startswith(MAGIC):
+            raise ValueError("invalid Huffman bitstream header")
+        offset = len(MAGIC)
+        (header_len,) = struct.unpack_from(">I", data, offset)
+        offset += 4
+        header = json.loads(data[offset : offset + header_len].decode("utf-8"))
+        offset += header_len
+        payload = data[offset:]
+        self.codes = header["codes"]
+        bit_count = header["bit_count"]
+        bits = bytes_to_bits(payload, bit_count)
+        reverse = {code: char for char, code in self.codes.items()}
+        symbols: List[str] = []
+        buf = ""
+        for b in bits:
+            buf += b
+            if buf in reverse:
+                symbols.append(reverse[buf])
+                buf = ""
+        if buf:
+            raise ValueError("truncated or corrupt bitstream")
+        return "".join(symbols)
 
 
-# 示例运行
+def utf8_byte_entropy(text: str) -> float:
+    data = text.encode("utf-8")
+    freq = Counter(data)
+    return shannon_entropy(freq)
+
+
+def verify_lossless(original: str, compressed: bytes) -> str:
+    coder = HuffmanCoder()
+    restored = coder.decode(compressed)
+    if restored != original:
+        raise AssertionError("lossless check failed: decoded text differs from original")
+    return restored
+
+
+def analyze(text: str, compressed: bytes) -> dict:
+    freq = Counter(text)
+    coder = HuffmanCoder(freq)
+    coder.root = build_huffman_tree(freq)
+    coder.codes = build_codes(coder.root)
+
+    h_symbol = shannon_entropy(freq)
+    h_byte = utf8_byte_entropy(text)
+    L = average_code_length(freq, coder.codes)
+    eta = h_symbol / L if L > 0 else 0.0
+
+    orig_bytes = len(text.encode("utf-8"))
+    zlib_bytes = len(zlib.compress(text.encode("utf-8"), level=9))
+
+    return {
+        "symbols": len(text),
+        "unique_symbols": len(freq),
+        "entropy_per_symbol_bits": h_symbol,
+        "entropy_per_byte_bits": h_byte,
+        "avg_code_length_bits": L,
+        "efficiency_eta": eta,
+        "redundancy_bits": L - h_symbol,
+        "original_utf8_bytes": orig_bytes,
+        "compressed_bytes": len(compressed),
+        "compression_ratio": orig_bytes / len(compressed) if compressed else 0.0,
+        "bits_per_symbol_actual": (len(compressed) * 8) / len(text) if text else 0.0,
+        "zlib_bytes": zlib_bytes,
+        "zlib_ratio": orig_bytes / zlib_bytes if zlib_bytes else 0.0,
+    }
+
+
+def print_report(text: str, compressed: bytes, path: Optional[Path] = None) -> None:
+    stats = analyze(text, compressed)
+    title = f"信源编码效率报告 — {path}" if path else "信源编码效率报告"
+    print("=" * 60)
+    print(title)
+    print("=" * 60)
+    print(f"符号数（字符）           : {stats['symbols']}")
+    print(f"不同符号种类数           : {stats['unique_symbols']}")
+    print(f"Shannon 熵 H（每符号）   : {stats['entropy_per_symbol_bits']:.4f} bit/符号")
+    print(f"Shannon 熵 H（每字节）   : {stats['entropy_per_byte_bits']:.4f} bit/字节 (UTF-8)")
+    print(f"Huffman 平均码长 L       : {stats['avg_code_length_bits']:.4f} bit/符号")
+    print(f"冗余度 (L - H)           : {stats['redundancy_bits']:.4f} bit/符号")
+    print(f"编码效率 η = H/L         : {stats['efficiency_eta']:.4f}  (≤ 1，接近 Kraft 界)")
+    print("-" * 60)
+    print(f"原文体积 (UTF-8)         : {stats['original_utf8_bytes']} 字节")
+    print(f"压缩后体积 (Huffman)     : {stats['compressed_bytes']} 字节")
+    print(f"压缩比（原/压）          : {stats['compression_ratio']:.4f}")
+    print(f"实际比特/符号（含开销）  : {stats['bits_per_symbol_actual']:.4f}")
+    print(f"zlib 参考                : {stats['zlib_bytes']} 字节 (压缩比 {stats['zlib_ratio']:.4f})")
+    print("=" * 60)
+    print("无损往返验证：通过")
+    print("说明：η 接近 1 表示码长接近熵界；压缩文件含码本开销，长文本压缩比通常更好。")
+
+
+def load_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def load_default_sample() -> str:
+    if not SAMPLE_FILE.is_file():
+        raise FileNotFoundError(f"默认样例文件不存在: {SAMPLE_FILE}")
+    return load_text(SAMPLE_FILE)
+
+
+def main(argv: Optional[Iterable[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="文本 Huffman 无损信源编码")
+    parser.add_argument(
+        "input",
+        nargs="?",
+        type=Path,
+        help="待压缩的 UTF-8 文本文件（默认使用同目录 sample.txt）",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        help="将压缩结果写入 .huf 文件",
+    )
+    parser.add_argument(
+        "--decode",
+        type=Path,
+        help="解码 .huf 文件并将原文输出到标准输出",
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    if args.decode:
+        if not args.decode.is_file():
+            print(
+                f"错误：找不到压缩文件 {args.decode}\n"
+                f"请先编码并写出文件，例如：python pro1.py 源文本.txt -o {args.decode}",
+                file=sys.stderr,
+            )
+            return 1
+        data = args.decode.read_bytes()
+        text = HuffmanCoder().decode(data)
+        sys.stdout.write(text)
+        return 0
+
+    if args.input and args.input.is_file():
+        text = load_text(args.input)
+        src_path = args.input
+    else:
+        text = load_default_sample()
+        src_path = SAMPLE_FILE
+        if args.input:
+            print(f"警告：未找到 {args.input}，改用 {SAMPLE_FILE}。", file=sys.stderr)
+
+    coder = HuffmanCoder()
+    coder.fit(text)
+    compressed = coder.encode(text)
+    verify_lossless(text, compressed)
+
+    if args.output:
+        args.output.write_bytes(compressed)
+        print(f"已写入 {args.output}（{len(compressed)} 字节）", file=sys.stderr)
+
+    print_report(text, compressed, src_path)
+    return 0
+
+
 if __name__ == "__main__":
-    # 测试文本
-    test_text = """
-    this is a test text for lossless source coding using Huffman coding.
-    The goal is to compress text and verify coding efficiency.
-    """
-    
-    hc = HuffmanCoding()
-    
-    # 压缩
-    compressed, codes = hc.compress(test_text)
-    
-    # 解压
-    decompressed = hc.decompress(compressed)
-    
-    # 计算效率指标
-    metrics = hc.calculate_efficiency(test_text, compressed)
-    
-    # 输出结果
-    print("=" * 60)
-    print("Project 1: Lossless Source Coding - Huffman Coding")
-    print("=" * 60)
-    print(f"原始文本长度: {len(test_text)} 字符")
-    print(f"压缩后比特数: {metrics['compressed_bits']} bits")
-    print(f"原始比特数 (ASCII): {metrics['original_bits']} bits")
-    print(f"压缩率: {metrics['compression_ratio']:.2%}")
-    print(f"平均码长: {metrics['avg_code_length']:.2f} bits/char")
-    print(f"信源熵 H(X): {metrics['entropy']:.4f} bits/char")
-    print(f"编码效率: {metrics['coding_efficiency']:.2%}")
-    print(f"\n解码验证成功: {test_text == decompressed}")
-    print("\n码表 (前10个):")
-    for i, (ch, code) in enumerate(codes.items()):
-        if i >= 10:
-            break
-        print(f"  '{ch}': {code}")
+    raise SystemExit(main())
