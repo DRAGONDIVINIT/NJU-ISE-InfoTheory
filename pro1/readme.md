@@ -96,7 +96,7 @@ python pro1.py
 
 - **Python**：3.8+
 - **依赖**：仅标准库，**无需** `pip install`
-- **编码**：UTF-8；Windows 建议用 `pro1.bat` 或 `chcp 65001` 避免中文乱码
+- **编码**：读入自动尝试 UTF-8 / GBK；输出为 UTF-8。Windows 建议 `pro1.bat` 或 `chcp 65001`
 
 ---
 
@@ -123,8 +123,6 @@ python pro1.py
 | 压缩比（原/压） | 含码本头的实际体积比 |
 | zlib 参考 | 标准库 zlib 对比 |
 | 无损往返验证：通过 | 往返解码与原文一致 |
-
-\(\eta \approx 1\) 表示码字接近最优；短文本压缩比小于 1 属正常。
 
 ---
 

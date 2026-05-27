@@ -227,11 +227,16 @@ def print_report(text: str, compressed: bytes, path: Optional[Path] = None) -> N
     print(f"zlib 参考                : {stats['zlib_bytes']} 字节 (压缩比 {stats['zlib_ratio']:.4f})")
     print("=" * 60)
     print("无损往返验证：通过")
-    print("说明：η 接近 1 表示码长接近熵界；压缩文件含码本开销，长文本压缩比通常更好。")
 
 
 def load_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    data = path.read_bytes()
+    for encoding in ("utf-8-sig", "utf-8", "gbk"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def load_default_sample() -> str:
@@ -244,9 +249,12 @@ BASE_DIR = Path(__file__).resolve().parent
 
 
 def _list_files(directory: Path, suffix: str) -> List[Path]:
-    return sorted(
+    files = sorted(
         p for p in directory.iterdir() if p.is_file() and p.suffix.lower() == suffix
     )
+    if suffix == ".txt":
+        files = [p for p in files if not p.stem.endswith("_restored")]
+    return files
 
 
 def _prompt_line(prompt: str) -> str:
@@ -338,7 +346,7 @@ def interactive_loop() -> int:
         try:
             if action in ("1", "2"):
                 txt_files = _list_files(BASE_DIR, ".txt")
-                src = _pick_path("\n可选 UTF-8 文本:", txt_files, default=SAMPLE_FILE)
+                src = _pick_path("\n可选文本:", txt_files, default=SAMPLE_FILE)
                 if not src:
                     continue
                 out: Optional[Path] = None
