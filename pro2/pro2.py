@@ -28,13 +28,11 @@ BASE_DIR = Path(__file__).resolve().parent
 IMAGES_DIR = BASE_DIR / "images"
 OUTPUT_DIR = BASE_DIR / "output"
 
-# 信道标识（内部小写，报告/菜单统一为大写缩写，与 BSC、BEC 格式一致）
 CHANNEL_IDEAL = "ideal"
 CHANNEL_BSC = "bsc"
 CHANNEL_BEC = "bec"
 DEFAULT_CHANNELS = (CHANNEL_IDEAL, CHANNEL_BSC, CHANNEL_BEC)
 
-# Standard JPEG luminance quantization (quality scales this table).
 JPEG_LUMA = np.array(
     [
         [16, 11, 10, 16, 24, 40, 51, 61],
@@ -82,9 +80,6 @@ ZIGZAG = [
     (6, 5), (7, 4), (7, 5), (6, 6), (7, 7),
 ]
 
-# ---------------------------------------------------------------------------
-# DCT / quantization (lossy source coding)
-# ---------------------------------------------------------------------------
 
 def scale_quant_table(quality: int) -> np.ndarray:
     q = max(1, min(100, quality))
@@ -133,7 +128,7 @@ def rle_encode(coeffs: Sequence[int]) -> List[Tuple[int, int]]:
             zero_run = 0
     if zero_run > 0:
         runs.append((zero_run, 0))
-    runs.append((0, 0))  # EOB
+    runs.append((0, 0)) 
     return runs
 
 
@@ -206,12 +201,6 @@ def bits_to_bytes(bits: str) -> bytes:
     return bytes(int(padded[i : i + 8], 2) for i in range(0, len(padded), 8))
 
 
-# ---------------------------------------------------------------------------
-# Hamming (7, 4) channel coding
-# Layout (1-indexed): [p1, p2, d1, p3, d2, d3, d4]
-# ---------------------------------------------------------------------------
-
-
 def _parity(*bits: int) -> int:
     return sum(bits) % 2
 
@@ -249,7 +238,7 @@ def hamming_encode_bits(bits: str) -> str:
     return "".join(out)
 
 
-REP_FACTOR = 5  # repetition before Hamming; majority vote tolerates 2 errors per 5 bits at p≈0.02
+REP_FACTOR = 10  
 
 
 def repetition_encode(bits: str, n: int = REP_FACTOR) -> str:
@@ -290,12 +279,7 @@ def hamming_decode_bits(bits: str) -> Tuple[str, int]:
         out.extend(str(b) for b in data)
     return "".join(out), corrected
 
-
-# ---------------------------------------------------------------------------
-# Channel models
-# ---------------------------------------------------------------------------
-
-Bit = Union[int, str]  # 0/1 or 'E' erasure
+Bit = Union[int, str] 
 
 
 def bsc_channel(bits: str, p: float, rng: random.Random) -> Tuple[str, int]:
@@ -362,10 +346,6 @@ def hamming_decode_erasure_bits(bits: str) -> Tuple[str, int]:
     return "".join(out), resolved
 
 
-# ---------------------------------------------------------------------------
-# Metrics
-# ---------------------------------------------------------------------------
-
 def psnr(original: np.ndarray, restored: np.ndarray) -> float:
     orig = original.astype(np.float64)
     rec = restored.astype(np.float64)
@@ -407,7 +387,7 @@ class PipelineResult:
     total_ms: float
 
 
-def load_gray_image(path: Path, max_side: int = 256) -> np.ndarray:
+def load_gray_image(path: Path, max_side: int = 1280) -> np.ndarray:
     img = Image.open(path).convert("L")
     w, h = img.size
     if max(w, h) > max_side:
@@ -590,7 +570,7 @@ def run_experiment(
 def print_summary(results: List[PipelineResult]) -> None:
     """汇总表：信道列与 IDEAL/BSC/BEC 等宽对齐，数值列右对齐。"""
     col_image = 12
-    col_channel = 5  # IDEAL / BSC / BEC
+    col_channel = 5
     col_quality = 4
     col_psnr = 8
     col_acc = 8
@@ -644,9 +624,6 @@ def print_summary(results: List[PipelineResult]) -> None:
         f"平均 PSNR: {avg_psnr:.2f} dB | 平均像素准确度: {avg_acc * 100:.2f}% | "
         f"平均耗时: {avg_time:.1f} ms"
     )
-    print("\n复杂度（理论）:")
-    print("  信源编/译码: O(N)，N 为像素数；每块 8×8 DCT 为常数工作量。")
-    print(f"  重复码 ({REP_FACTOR},1) + Hamming (7,4): 对信源比特长度 B 为 O(B)。")
     print("=" * line_w)
 
 
